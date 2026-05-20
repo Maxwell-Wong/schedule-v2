@@ -245,6 +245,13 @@ Data source: Real work order data, must schedule strictly according to this data
 
 def combine_prompt(prompt_parts, excel_data_text):
     """Combine complete prompt"""
+    # Get weekend rules or use default
+    weekend_rules = prompt_parts.get('weekend_rules', '''
+## Weekend Time Format Rules
+**周末时间槽必须全部使用独立时间点格式，绝对禁止使用时间段格式（如"18:00-19:00"）！**
+**所有周末日期的time_slots_by_date必须全部为"HH:MM"格式，不能包含任何"-"符号！**
+''')
+
     full_prompt = f"""
 # Complete Scheduling Task Prompt
 
@@ -258,9 +265,7 @@ def combine_prompt(prompt_parts, excel_data_text):
 {prompt_parts['part3']}
 
 # 🚨 CRITICAL WEEKEND TIME FORMAT RULES 🚨
-{prompt_parts.get('weekend_rules', '## Weekend Time Format Rules
-**周末时间槽必须全部使用独立时间点格式，绝对禁止使用时间段格式（如"18:00-19:00"）！**
-**所有周末日期的time_slots_by_date必须全部为"HH:MM"格式，不能包含任何"-"符号！**')}
+{weekend_rules}
 
 ## Important Reminders
 1. You must schedule according to the real data in the above Excel file
