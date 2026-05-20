@@ -70,6 +70,14 @@ def load_prompt_parts():
         with open(separation_rules_file, 'r', encoding='utf-8') as f:
             parts['separation_rules'] = f.read()
 
+    # Part 6: Work order uniqueness rules (CRITICAL)
+    uniqueness_rules_file = 'prompt_work_order_uniqueness.md'
+    if not os.path.exists(uniqueness_rules_file):
+        print(f"Warning: Work order uniqueness rules file not found: {uniqueness_rules_file}")
+    else:
+        with open(uniqueness_rules_file, 'r', encoding='utf-8') as f:
+            parts['uniqueness_rules'] = f.read()
+
     return parts
 
 
@@ -266,6 +274,13 @@ def combine_prompt(prompt_parts, excel_data_text):
 **工作日工单绝对禁止分配到周末日期列！周末工单绝对禁止分配到工作日日期列！**
 ''')
 
+    # Get uniqueness rules or use default
+    uniqueness_rules = prompt_parts.get('uniqueness_rules', '''
+## Work Order Uniqueness Rules
+**每张工单在全局排班表中只能出现一次，绝对禁止重复分配！**
+**如果发现重复分配，立即删除所有重复项，只保留第一次分配！**
+''')
+
     full_prompt = f"""
 # Complete Scheduling Task Prompt
 
@@ -284,6 +299,9 @@ def combine_prompt(prompt_parts, excel_data_text):
 # 🚨 CRITICAL WEEKDAY/WEEKEND SEPARATION RULES 🚨
 {separation_rules}
 
+# 🚨 CRITICAL WORK ORDER UNIQUENESS RULES 🚨
+{uniqueness_rules}
+
 ## Important Reminders
 1. You must schedule according to the real data in the above Excel file
 2. Strictly follow the format requirements of Part 1 and personnel information of Part 2
@@ -291,6 +309,7 @@ def combine_prompt(prompt_parts, excel_data_text):
 4. Ensure all work orders are assigned, do not omit any data
 5. **🚨 CRITICAL: Weekend time slots must ONLY use individual time points (like "12:00", "12:30"), NEVER use time ranges (like "18:00-19:00")!**
 6. **🚨 CRITICAL: Weekday work orders MUST ONLY be assigned to weekday dates, weekend work orders MUST ONLY be assigned to weekend dates!**
+7. **🚨 CRITICAL: Each work order MUST appear EXACTLY ONCE in the entire schedule, absolutely NO duplication allowed!**
 
 Please start generating the schedule now, output in JSON format (for easy conversion to Excel).
 """
