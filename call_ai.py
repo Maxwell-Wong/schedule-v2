@@ -7,12 +7,25 @@ Read prompt files and Excel data, call AI to generate schedule
 """
 
 import os
+import sys
 import configparser
 import json
 import pandas as pd
 from datetime import datetime
 from openai import OpenAI
-import json_to_xlsx  # Static import for PyInstaller compatibility
+
+# Add current directory to Python path for imports
+if getattr(sys, 'frozen', False):  # Running as compiled exe
+    sys.path.insert(0, os.path.dirname(sys.executable))
+else:  # Running as script
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import json_to_xlsx with error handling
+try:
+    import json_to_xlsx
+except ImportError:
+    print("Warning: json_to_xlsx module not found. Excel conversion will be skipped.")
+    json_to_xlsx = None
 
 
 def load_config(config_file='config.ini'):
@@ -459,12 +472,16 @@ def main():
         # Convert JSON to Excel
         print("\n[Extra] Converting JSON to Excel...")
         try:
-            # Use the statically imported json_to_xlsx module
-            json_to_xlsx.create_excel_from_json(
-                data=json_to_xlsx.load_json_result('ai_responses/schedule_result.json'),
-                output_file='output_transformed.xlsx'
-            )
-            print("  ✓ Excel conversion completed!")
+            # Check if json_to_xlsx module is available
+            if json_to_xlsx is not None:
+                json_to_xlsx.create_excel_from_json(
+                    data=json_to_xlsx.load_json_result('ai_responses/schedule_result.json'),
+                    output_file='output_transformed.xlsx'
+                )
+                print("  ✓ Excel conversion completed!")
+            else:
+                print("  ⚠ json_to_xlsx module not available, skipping Excel conversion")
+                print("  💡 Please ensure json_to_xlsx.py is in the same directory")
         except Exception as e:
             print(f"  ✗ Error during Excel conversion: {e}")
             print("  💡 Try running manually: python json_to_xlsx.py")
