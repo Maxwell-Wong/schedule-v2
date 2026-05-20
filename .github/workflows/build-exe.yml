@@ -30,7 +30,20 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --console --name schedule-v2 --add-data "data;data" --add-data "config.ini;." call_ai.py
+        pyinstaller --onefile --console --name schedule-v2 `
+          --add-data "data;data" `
+          --add-data "config.ini;." `
+          --add-data "prompt_part1_fixed_rules.md;." `
+          --add-data "prompt_part2_variables.md;." `
+          --add-data "prompt_part3_output_rules.md;." `
+          --add-data "prompt_weekend_time_rules.md;." `
+          --add-data "prompt_weekday_weekend_separation.md;." `
+          --add-data "prompt_work_order_uniqueness.md;." `
+          --hidden-import=json_to_xlsx `
+          --hidden-import=openpyxl `
+          --hidden-import=pandas `
+          --hidden-import=openai `
+          call_ai.py
 
     - name: Rename EXE with version
       run: |

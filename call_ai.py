@@ -12,6 +12,7 @@ import json
 import pandas as pd
 from datetime import datetime
 from openai import OpenAI
+import json_to_xlsx  # Static import for PyInstaller compatibility
 
 
 def load_config(config_file='config.ini'):
@@ -458,8 +459,7 @@ def main():
         # Convert JSON to Excel
         print("\n[Extra] Converting JSON to Excel...")
         try:
-            # Import and run the    converter directly
-            import json_to_xlsx
+            # Use the statically imported json_to_xlsx module
             json_to_xlsx.create_excel_from_json(
                 data=json_to_xlsx.load_json_result('ai_responses/schedule_result.json'),
                 output_file='output_transformed.xlsx'
