@@ -1087,53 +1087,38 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 cell.font = Font(name=font_family, size=14)
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         else:
-            # 周末：显示时间点
-            if len(time_slots) == 1 and '-' in str(time_slots[0]):
-                # 需要拆分时间范围
-                time_range = time_slots[0]
-                if '-' in time_range:
-                    start_time, end_time = time_range.split('-')
-                    # 为每个列生成时间点
-                    if len(cols) == 2:
-                        # 两列：使用start和end
-                        cell1 = ws.cell(row=3, column=cols[0])
-                        cell1.value = start_time
-                        cell1.font = Font(name=font_family, size=14)
-                        cell1.alignment = Alignment(horizontal='center', vertical='center')
-
-                        cell2 = ws.cell(row=3, column=cols[1])
-                        cell2.value = end_time
-                        cell2.font = Font(name=font_family, size=14)
-                        cell2.alignment = Alignment(horizontal='center', vertical='center')
+            # 周末：显示时间点，绝对禁止显示时间段格式
+            # 首先处理所有时间槽，拆分任何时间段格式
+            processed_time_slots = []
+            for slot in time_slots:
+                if '-' in str(slot):
+                    # 拆分时间段为独立时间点
+                    parts = str(slot).split('-')
+                    if len(parts) == 2:
+                        processed_time_slots.append(parts[0].strip())
+                        processed_time_slots.append(parts[1].strip())
                     else:
-                        # 多列：平均分配时间点
-                        for i, col in enumerate(cols):
-                            cell = ws.cell(row=3, column=col)
-                            if i == 0:
-                                cell.value = start_time
-                            elif i == len(cols) - 1:
-                                cell.value = end_time
-                            else:
-                                # 中间列，计算中间时间点
-                                cell.value = time_range  # 暂时显示完整范围
-                            cell.font = Font(name=font_family, size=14)
-                            cell.alignment = Alignment(horizontal='center', vertical='center')
+                        # 如果格式不对，保持原样
+                        processed_time_slots.append(slot)
                 else:
-                    # 不包含'-'，直接显示
-                    for col in cols:
-                        cell = ws.cell(row=3, column=col)
-                        cell.value = time_slots[0]
-                        cell.font = Font(name=font_family, size=14)
-                        cell.alignment = Alignment(horizontal='center', vertical='center')
-            else:
-                # 多个时间槽，直接显示
-                for i, time_slot in enumerate(time_slots):
-                    if i >= len(cols):
-                        break
-                    cell = ws.cell(row=3, column=cols[i])
-                    cell.value = time_slot
-                    cell.font = Font(name=font_family, size=14)
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    processed_time_slots.append(slot)
+
+            # 去重并保持顺序
+            seen = set()
+            unique_time_slots = []
+            for slot in processed_time_slots:
+                if slot not in seen:
+                    seen.add(slot)
+                    unique_time_slots.append(slot)
+
+            # 显示处理后的时间点
+            for i, time_slot in enumerate(unique_time_slots):
+                if i >= len(cols):
+                    break
+                cell = ws.cell(row=3, column=cols[i])
+                cell.value = time_slot
+                cell.font = Font(name=font_family, size=14)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
 
     # 人员行
     for row_idx, person_data in enumerate(personnel_assignments, start=4):

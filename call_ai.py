@@ -62,6 +62,14 @@ def load_prompt_parts():
         with open(weekend_rules_file, 'r', encoding='utf-8') as f:
             parts['weekend_rules'] = f.read()
 
+    # Part 5: Weekday/Weekend separation rules (CRITICAL)
+    separation_rules_file = 'prompt_weekday_weekend_separation.md'
+    if not os.path.exists(separation_rules_file):
+        print(f"Warning: Weekday/Weekend separation rules file not found: {separation_rules_file}")
+    else:
+        with open(separation_rules_file, 'r', encoding='utf-8') as f:
+            parts['separation_rules'] = f.read()
+
     return parts
 
 
@@ -252,6 +260,12 @@ def combine_prompt(prompt_parts, excel_data_text):
 **所有周末日期的time_slots_by_date必须全部为"HH:MM"格式，不能包含任何"-"符号！**
 ''')
 
+    # Get separation rules or use default
+    separation_rules = prompt_parts.get('separation_rules', '''
+## Weekday/Weekend Separation Rules
+**工作日工单绝对禁止分配到周末日期列！周末工单绝对禁止分配到工作日日期列！**
+''')
+
     full_prompt = f"""
 # Complete Scheduling Task Prompt
 
@@ -267,12 +281,16 @@ def combine_prompt(prompt_parts, excel_data_text):
 # 🚨 CRITICAL WEEKEND TIME FORMAT RULES 🚨
 {weekend_rules}
 
+# 🚨 CRITICAL WEEKDAY/WEEKEND SEPARATION RULES 🚨
+{separation_rules}
+
 ## Important Reminders
 1. You must schedule according to the real data in the above Excel file
 2. Strictly follow the format requirements of Part 1 and personnel information of Part 2
 3. Generate final results according to the output format of Part 3
 4. Ensure all work orders are assigned, do not omit any data
 5. **🚨 CRITICAL: Weekend time slots must ONLY use individual time points (like "12:00", "12:30"), NEVER use time ranges (like "18:00-19:00")!**
+6. **🚨 CRITICAL: Weekday work orders MUST ONLY be assigned to weekday dates, weekend work orders MUST ONLY be assigned to weekend dates!**
 
 Please start generating the schedule now, output in JSON format (for easy conversion to Excel).
 """
