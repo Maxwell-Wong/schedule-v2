@@ -1,0 +1,135 @@
+name: Build Schedule Generator EXE
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build EXE with PyInstaller
+      run: |
+        pyinstaller --onefile --console --name schedule-v2 --add-data "data;data" --add-data "config.ini;." call_ai.py
+
+    - name: Rename EXE with version
+      run: |
+        if ("${{ github.ref }}" -match "refs/tags/v*") {
+          $version = "${{ github.ref }}" -replace "refs/tags/v", ""
+          Move-Item dist/schedule-v2.exe "dist/schedule-v2-$version.exe"
+        } else {
+          Move-Item dist/schedule-v2.exe "dist/schedule-v2-latest.exe"
+        }
+
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: schedule-v2-windows-exe
+        path: dist/schedule-v2-*.exe
+        retention-days: 30
+
+    - name: Create Release (if tagged)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/schedule-v2-*.exe
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build Mac app
+      run: |
+        pyinstaller --onefile --console --name schedule-v2-mac --add-data "data:data" --add-data "config.ini:." call_ai.py
+
+    - name: Rename app with version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          version="${GITHUB_REF#refs/tags/v}"
+          mv dist/schedule-v2-mac "dist/schedule-v2-mac-$version"
+        else
+          mv dist/schedule-v2-mac "dist/schedule-v2-mac-latest"
+        fi
+
+    - name: Upload Mac artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: schedule-v2-mac-app
+        path: dist/schedule-v2-mac-*
+        retention-days: 30
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build Linux binary
+      run: |
+        pyinstaller --onefile --console --name schedule-v2-linux --add-data "data:data" --add-data "config.ini:." call_ai.py
+
+    - name: Rename binary with version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          version="${GITHUB_REF#refs/tags/v}"
+          mv dist/schedule-v2-linux "dist/schedule-v2-linux-$version"
+        else
+          mv dist/schedule-v2-linux "dist/schedule-v2-linux-latest"
+        fi
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: schedule-v2-linux-binary
+        path: dist/schedule-v2-linux-*
+        retention-days: 30
