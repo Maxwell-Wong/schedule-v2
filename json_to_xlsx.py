@@ -972,37 +972,16 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             # 收集所有需要的时间点
             required_times = set(time_slots)  # 从原始时间槽开始
 
-            # 添加所有工单的开始时间和结束时间（包括中间时间点）
+            # 添加所有工单的开始时间和结束时间
             for person_data in personnel_assignments:
                 for assignment in person_data.get('assignments', []):
                     if assignment.get('date') == date:
                         original_start = assignment.get('original_start', '')
                         original_end = assignment.get('original_end', '')
-
-                        # 添加开始时间
                         if original_start:
                             required_times.add(original_start)
-
-                        # 添加结束时间
                         if original_end:
                             required_times.add(original_end)
-
-                        # 如果时间跨度较大，添加中间时间点
-                        if original_start and original_end:
-                            try:
-                                start_min = time_to_minutes(original_start)
-                                end_min = time_to_minutes(original_end)
-                                duration = end_min - start_min
-
-                                # 如果时间跨度超过1小时，每30分钟添加一个时间点
-                                if duration > 60:
-                                    current_min = start_min + 30
-                                    while current_min < end_min:
-                                        intermediate_time = f"{current_min // 60:02d}:{current_min % 60:02d}"
-                                        required_times.add(intermediate_time)
-                                        current_min += 30
-                            except:
-                                pass
 
             # 转换为列表并按时间排序
             required_slots = sorted(list(required_times), key=time_to_minutes)
@@ -1013,6 +992,9 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 # Issue 4: 周末列宽16
                 ws.column_dimensions[get_column_letter(current_col)].width = 16
                 current_col += 1
+
+            # 更新time_slots_by_date以包含所有需要的时间点
+            time_slots_by_date[date] = required_slots
 
             # 更新time_slots_by_date以包含所有需要的时间点
             time_slots_by_date[date] = required_slots
@@ -1108,32 +1090,23 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 cell.font = Font(name=font_family, size=14)
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         else:
-            # 周末：显示时间点，绝对禁止显示时间段格式
-            # 首先处理所有时间槽，拆分任何时间段格式
-            processed_time_slots = []
+            # 周末：显示时间点，如果时间槽包含时间段格式，先拆分再显示
+            display_time_slots = []
             for slot in time_slots:
                 if '-' in str(slot):
                     # 拆分时间段为独立时间点
                     parts = str(slot).split('-')
                     if len(parts) == 2:
-                        processed_time_slots.append(parts[0].strip())
-                        processed_time_slots.append(parts[1].strip())
+                        display_time_slots.append(parts[0].strip())
+                        display_time_slots.append(parts[1].strip())
                     else:
                         # 如果格式不对，保持原样
-                        processed_time_slots.append(slot)
+                        display_time_slots.append(slot)
                 else:
-                    processed_time_slots.append(slot)
-
-            # 去重并保持顺序
-            seen = set()
-            unique_time_slots = []
-            for slot in processed_time_slots:
-                if slot not in seen:
-                    seen.add(slot)
-                    unique_time_slots.append(slot)
+                    display_time_slots.append(slot)
 
             # 显示处理后的时间点
-            for i, time_slot in enumerate(unique_time_slots):
+            for i, time_slot in enumerate(display_time_slots):
                 if i >= len(cols):
                     break
                 cell = ws.cell(row=3, column=cols[i])
@@ -1243,24 +1216,17 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
                     cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
             else:
-                # 不合并，直接放置到指定的时间槽
+                # 不合并，直接放置
                 if time_slot_index < len(cols):
                     target_col = cols[time_slot_index]
                     cell = ws.cell(row_idx, column=target_col)
-
-                    # 检查单元格是否已经有工单
-                    if cell.value and str(cell.value).strip():
-                        # 如果已经有工单，检查是否可以合并（相同时间范围）
-                        # 这里不再简单地把工单放在一起，而是跳过或者报错
-                        # 因为不同时间范围的工单不应该在同一个单元格
-                        print(f"警告：日期{date}的时间槽{time_slot_index}已经有工单：{cell.value}")
-                        print(f"新工单{work_order}（{original_start}-{original_end}）将被跳过")
-                        # 不覆盖，保持原有工单
+                    if cell.value:  # 如果已经有内容，添加换行
+                        cell.value = str(cell.value) + '\n' + work_order
                     else:
                         cell.value = work_order
-                        cell.font = Font(name=font_family, size=12)
-                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    cell.font = Font(name=font_family, size=12)
+                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
 
     # 合并周末的连续空白单元格
     for row_idx in range(4, len(personnel_assignments) + 4):  # 人员行从第4行开始
