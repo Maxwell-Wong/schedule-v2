@@ -1131,33 +1131,62 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
         person_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
 
         # 任务单元格
+        # 首先按日期分组assignments
+        assignments_by_date = {}
         for assignment in assignments:
-            date = assignment.get('date', '')
-            time_slot_index = assignment.get('time_slot_index', 0)
-            work_order = assignment.get('work_order', '')
-            original_start = assignment.get('original_start', '')
-            original_end = assignment.get('original_end', '')
-            merge_info = assignment.get('merge_info', {})
+            assignment_date = assignment.get('date', '')
+            if assignment_date not in assignments_by_date:
+                assignments_by_date[assignment_date] = []
+            assignments_by_date[assignment_date].append(assignment)
 
-            if date not in date_col_mapping:
-                continue
+        # 然后对每个日期的assignments进行处理
+        for target_date in assignments_by_date.keys():
+            if target_date not in date_col_mapping:
+                continue  # 跳过不在日期映射中的日期
 
-            cols = date_col_mapping[date]
-            time_slots = time_slots_by_date.get(date, [])
+            cols = date_col_mapping[target_date]
+            time_slots = time_slots_by_date.get(target_date, [])
 
-            # 判断是否需要合并单元格
-            should_merge = False
-            start_slot = time_slot_index
-            end_slot = time_slot_index
+            # 处理这个日期的所有assignments
+            for assignment in assignments_by_date[target_date]:
+                date = assignment.get('date', '')
+                time_slot_index = assignment.get('time_slot_index', 0)
+                work_order = assignment.get('work_order', '')
+                original_start = assignment.get('original_start', '')
+                original_end = assignment.get('original_end', '')
+                merge_info = assignment.get('merge_info', {})
 
-            # 判断是否为周末
-            is_weekend = date_is_weekend.get(date, False)
+                # 验证日期匹配（双重保险）
+                if date != target_date:
+                    print(f"警告：工单{work_order}的日期({date})与目标日期({target_date})不匹配，跳过")
+                    continue
 
-            if merge_info and merge_info.get('merge_cells'):
-                # 使用merge_info
-                should_merge = True
-                start_slot = merge_info.get('start_slot_index', time_slot_index)
-                end_slot = merge_info.get('end_slot_index', time_slot_index)
+                # 判断是否需要合并单元格
+                should_merge = False
+                start_slot = time_slot_index
+                end_slot = time_slot_index
+
+                # 判断是否为周末
+                is_weekend = date_is_weekend.get(date, False)
+
+                if merge_info and merge_info.get('merge_cells'):
+                # 使用merge_info，但要验证slot_index是否在有效范围内
+                provided_start = merge_info.get('start_slot_index', time_slot_index)
+                provided_end = merge_info.get('end_slot_index', time_slot_index)
+
+                # 验证slot_index是否在有效范围内
+                if 0 <= provided_start < len(time_slots) and 0 <= provided_end < len(time_slots):
+                    # merge_info中的slot_index有效，使用它
+                    should_merge = True
+                    start_slot = provided_start
+                    end_slot = provided_end
+                else:
+                    # merge_info中的slot_index无效，使用自动计算的逻辑
+                    print(f"警告：工单{work_order}的merge_info slot_index超出范围")
+                    print(f"  merge_info: start_slot_index={provided_start}, end_slot_index={provided_end}")
+                    print(f"  实际time_slots长度: {len(time_slots)}")
+                    print(f"  将使用自动计算的时间范围")
+                    should_merge = False  # 让后面的自动计算逻辑处理
             elif original_start and original_end and is_weekend and time_slots:
                 # 周末：自动判断是否需要合并：查找original_start和original_end对应的时间点
                 def time_to_minutes(time_str):
@@ -1177,51 +1206,67 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 start_idx = -1
                 end_idx = -1
 
+                # 优先查找精确匹配的开始时间
                 for i, slot in enumerate(time_slots):
                     slot_minutes = time_to_minutes(slot)
                     if slot_minutes == start_minutes:
                         start_idx = i
-                    # 找到最接近但不超过结束时间的时间点
-                    if slot_minutes <= end_minutes:
+                        break  # 找到精确匹配就停止
+
+                # 查找结束时间（优先精确匹配，其次最接近）
+                # 首先尝试精确匹配
+                for i, slot in enumerate(time_slots):
+                    slot_minutes = time_to_minutes(slot)
+                    if slot_minutes == end_minutes:
                         end_idx = i
+                        break  # 找到精确匹配就停止
+
+                # 如果没有精确匹配，找最接近的时间点
+                if end_idx == -1:
+                    # 找到小于等于结束时间的最接近时间点
+                    for i, slot in enumerate(time_slots):
+                        slot_minutes = time_to_minutes(slot)
+                        if slot_minutes <= end_minutes:
+                            end_idx = i
+                        else:
+                            break  # 超过结束时间就停止
 
                 # 如果找到了开始时间
                 if start_idx >= 0:
-                    # 如果结束时间不在列表中，end_idx会停在最后一个不超过结束时间的时间点
-                    # 如果确实需要合并到结束时间，使用end_idx
+                    # 如果找到了结束时间，使用它
                     if end_idx >= start_idx:
                         should_merge = True
                         start_slot = start_idx
                         end_slot = end_idx
                     else:
-                        # 如果end_idx < start_idx，说明没有找到合适的时间点，只使用开始时间
+                        # 如果end_idx < start_idx，说明没有找到合适的结束时间点，只使用开始时间
                         start_slot = start_idx
                         end_slot = start_idx
-            elif not is_weekend and original_start and original_end and time_slots:
-                # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
-                # 工作日通常只有一个时间槽
-                if len(time_slots) > 0:
-                    start_slot = 0
-                    end_slot = 0
+                elif not is_weekend and original_start and original_end and time_slots:
+                    # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
+                    # 工作日通常只有一个时间槽
+                    if len(time_slots) > 0:
+                        start_slot = 0
+                        end_slot = 0
 
-            if should_merge and start_slot < len(cols) and end_slot < len(cols):
-                # 合并单元格
-                min_col = cols[start_slot]
-                max_col = cols[end_slot]
-                ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
-                cell = ws.cell(row_idx, column=min_col)
-                if work_order:
-                    cell.value = work_order
-                    cell.font = Font(name=font_family, size=12)
-                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
-            else:
-                # 不合并，直接放置
-                if time_slot_index < len(cols):
-                    target_col = cols[time_slot_index]
-                    cell = ws.cell(row_idx, column=target_col)
-                    if cell.value:  # 如果已经有内容，添加换行
-                        cell.value = str(cell.value) + '\n' + work_order
+                if should_merge and start_slot < len(cols) and end_slot < len(cols):
+                    # 合并单元格
+                    min_col = cols[start_slot]
+                    max_col = cols[end_slot]
+                    ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+                    cell = ws.cell(row_idx, column=min_col)
+                    if work_order:
+                        cell.value = work_order
+                        cell.font = Font(name=font_family, size=12)
+                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                else:
+                    # 不合并，直接放置
+                    if time_slot_index < len(cols):
+                        target_col = cols[time_slot_index]
+                        cell = ws.cell(row_idx, column=target_col)
+                        if cell.value:  # 如果已经有内容，添加换行
+                            cell.value = str(cell.value) + '\n' + work_order
                     else:
                         cell.value = work_order
                     cell.font = Font(name=font_family, size=12)
