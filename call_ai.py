@@ -30,7 +30,7 @@ def load_config(config_file='config.ini'):
 
 
 def load_prompt_parts():
-    """Load three parts of prompts"""
+    """Load prompt parts including weekend time rules"""
     parts = {}
 
     # Part 1: Fixed rules
@@ -53,6 +53,14 @@ def load_prompt_parts():
         raise FileNotFoundError(f"Prompt file not found: {part3_file}")
     with open(part3_file, 'r', encoding='utf-8') as f:
         parts['part3'] = f.read()
+
+    # Part 4: Weekend time rules (CRITICAL)
+    weekend_rules_file = 'prompt_weekend_time_rules.md'
+    if not os.path.exists(weekend_rules_file):
+        print(f"Warning: Weekend rules file not found: {weekend_rules_file}")
+    else:
+        with open(weekend_rules_file, 'r', encoding='utf-8') as f:
+            parts['weekend_rules'] = f.read()
 
     return parts
 
@@ -249,11 +257,17 @@ def combine_prompt(prompt_parts, excel_data_text):
 
 {prompt_parts['part3']}
 
+# 🚨 CRITICAL WEEKEND TIME FORMAT RULES 🚨
+{prompt_parts.get('weekend_rules', '## Weekend Time Format Rules
+**周末时间槽必须全部使用独立时间点格式，绝对禁止使用时间段格式（如"18:00-19:00"）！**
+**所有周末日期的time_slots_by_date必须全部为"HH:MM"格式，不能包含任何"-"符号！**')}
+
 ## Important Reminders
 1. You must schedule according to the real data in the above Excel file
 2. Strictly follow the format requirements of Part 1 and personnel information of Part 2
 3. Generate final results according to the output format of Part 3
 4. Ensure all work orders are assigned, do not omit any data
+5. **🚨 CRITICAL: Weekend time slots must ONLY use individual time points (like "12:00", "12:30"), NEVER use time ranges (like "18:00-19:00")!**
 
 Please start generating the schedule now, output in JSON format (for easy conversion to Excel).
 """
