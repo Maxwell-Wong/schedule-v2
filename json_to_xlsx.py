@@ -844,13 +844,27 @@ def create_schedule_sheet_from_assignments_format(ws, data):
                 # 工作日：使用第一列
                 target_col = cols[0]
                 cell = ws.cell(row_idx, column=target_col)
-                if cell.value:  # 如果已经有内容，添加换行
-                    cell.value = str(cell.value) + '\n' + work_order
-                else:
-                    cell.value = work_order
-                cell.font = Font(name=font_family, size=12)
-                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                try:
+                    current_value = cell.value if cell.value else ""
+                    if current_value and str(current_value).strip():
+                        # 如果已经有内容，添加换行
+                        cell.value = str(current_value) + '\n' + work_order
+                    else:
+                        cell.value = work_order
+                    cell.font = Font(name=font_family, size=12)
+                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                except Exception as e:
+                    print(f"⚠️ 警告：工作日写入单元格时出错: {e}")
+                    # 如果写入失败，直接覆盖
+                    try:
+                        cell.value = work_order
+                        cell.font = Font(name=font_family, size=12)
+                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    except:
+                        print(f"❌ 错误：无法写入工单到工作日单元格")
+                        raise
             else:
                 # 周末：使用merge_columns或匹配时间点
                 target_cols = []
@@ -1331,14 +1345,41 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 # 不合并，直接放置
                 if time_slot_index < len(cols):
                     target_col = cols[time_slot_index]
-                    cell = ws.cell(row_idx, column=target_col)
-                    if cell.value:  # 如果已经有内容，添加换行
-                        cell.value = str(cell.value) + '\n' + work_order
-                    else:
-                        cell.value = work_order
-                    cell.font = Font(name=font_family, size=12)
-                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+
+                    # 检查目标单元格是否已被合并
+                    is_merged = False
+                    for merged_cell in ws.merged_cells.ranges:
+                        if (merged_cell.min_row <= row_idx <= merged_cell.max_row and
+                            merged_cell.min_col <= target_col <= merged_cell.max_col):
+                            is_merged = True
+                            # 如果目标单元格在合并区域内，使用主单元格
+                            row_idx = merged_cell.min_row
+                            target_col = merged_cell.min_col
+                            break
+
+                    cell = ws.cell(row=row_idx, column=target_col)
+                    try:
+                        current_value = cell.value if cell.value else ""
+                        if current_value and str(current_value).strip():
+                            # 如果已经有内容，添加换行
+                            cell.value = str(current_value) + '\n' + work_order
+                        else:
+                            cell.value = work_order
+                        cell.font = Font(name=font_family, size=12)
+                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    except Exception as e:
+                        print(f"⚠️ 警告：写入单元格 ({row_idx}, {target_col}) 时出错: {e}")
+                        # 如果写入失败，尝试使用备用位置
+                        try:
+                            backup_cell = ws.cell(row=row_idx, column=cols[0])
+                            backup_cell.value = work_order
+                            backup_cell.font = Font(name=font_family, size=12)
+                            backup_cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                            backup_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                        except:
+                            print(f"❌ 错误：无法为工单找到合适的单元格位置")
+                            raise
 
     # 合并周末的连续空白单元格
     for row_idx in range(4, len(personnel_assignments) + 4):  # 人员行从第4行开始
@@ -1354,20 +1395,39 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             occupied_cols = set()
 
             for i, col in enumerate(cols):
-                cell = ws.cell(row=row_idx, column=col)
-                if cell.value and str(cell.value).strip():
-                    # 这个单元格有工单内容
-                    occupied_cols.add(i)
-                    # 还要检查这个单元格是否合并了其他列
+                try:
+                    cell = ws.cell(row=row_idx, column=col)
+                    # 检查单元格是否在合并区域内
+                    cell_in_merged = False
                     for merged_cell in ws.merged_cells.ranges:
-                        if (merged_cell.min_row == row_idx and
-                            merged_cell.max_row == row_idx and
+                        if (merged_cell.min_row <= row_idx <= merged_cell.max_row and
                             merged_cell.min_col <= col <= merged_cell.max_col):
-                            # 这个单元格是合并区域的一部分
-                            for merged_col in range(merged_cell.min_col, merged_cell.max_col + 1):
-                                if merged_col in cols:
-                                    occupied_cols.add(cols.index(merged_col))
+                            # 单元格在合并区域内
+                            # 只有主单元格（左上角）才有可读的值
+                            if row_idx == merged_cell.min_row and col == merged_cell.min_col:
+                                # 这是主单元格，可以读取值
+                                if cell.value and str(cell.value).strip():
+                                    cell_in_merged = True
+                            else:
+                                # 非主单元格，如果在合并区域内则认为被占用
+                                cell_in_merged = True
+
+                            if cell_in_merged:
+                                # 标记整个合并区域占用的列
+                                for merged_col in range(merged_cell.min_col, merged_cell.max_col + 1):
+                                    if merged_col in cols:
+                                        occupied_cols.add(cols.index(merged_col))
                             break
+
+                    # 如果不在合并区域内，直接检查值
+                    if not cell_in_merged:
+                        if cell.value and str(cell.value).strip():
+                            occupied_cols.add(i)
+
+                except Exception as e:
+                    # 如果读取单元格值时出错，跳过该单元格
+                    print(f"⚠️ 警告：读取单元格 ({row_idx}, {col}) 时出错: {e}")
+                    continue
 
             # 找到连续的空白单元格区域（未被占用的列）
             empty_start = -1
@@ -1421,17 +1481,37 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             occupied_cols = set()
 
             for i, col in enumerate(cols):
-                cell = ws.cell(row=row_idx, column=col)
-                if cell.value and str(cell.value).strip():
-                    occupied_cols.add(i)
+                try:
+                    cell = ws.cell(row=row_idx, column=col)
+                    # 检查单元格是否在合并区域内
+                    cell_in_merged = False
                     for merged_cell in ws.merged_cells.ranges:
-                        if (merged_cell.min_row == row_idx and
-                            merged_cell.max_row == row_idx and
+                        if (merged_cell.min_row <= row_idx <= merged_cell.max_row and
                             merged_cell.min_col <= col <= merged_cell.max_col):
-                            for merged_col in range(merged_cell.min_col, merged_cell.max_col + 1):
-                                if merged_col in cols:
-                                    occupied_cols.add(cols.index(merged_col))
+                            # 单元格在合并区域内
+                            if row_idx == merged_cell.min_row and col == merged_cell.min_col:
+                                # 主单元格，可以读取值
+                                if cell.value and str(cell.value).strip():
+                                    cell_in_merged = True
+                            else:
+                                # 非主单元格，如果在合并区域内则认为被占用
+                                cell_in_merged = True
+
+                            if cell_in_merged:
+                                for merged_col in range(merged_cell.min_col, merged_cell.max_col + 1):
+                                    if merged_col in cols:
+                                        occupied_cols.add(cols.index(merged_col))
                             break
+
+                    # 如果不在合并区域内，直接检查值
+                    if not cell_in_merged:
+                        if cell.value and str(cell.value).strip():
+                            occupied_cols.add(i)
+
+                except Exception as e:
+                    # 如果读取单元格值时出错，跳过该单元格
+                    print(f"⚠️ 警告：读取单元格 ({row_idx}, {col}) 时出错: {e}")
+                    continue
 
             # 找到连续的空白单元格区域
             empty_start = -1
@@ -1684,13 +1764,27 @@ def create_schedule_sheet_from_final_format(ws, data):
                 else:
                     # 不合并，直接放置
                     cell = ws.cell(row_idx, column=target_col)
-                    if cell.value:  # 如果已经有内容，添加换行
-                        cell.value = str(cell.value) + '\n' + work_order
-                    else:
-                        cell.value = work_order
-                    cell.font = Font(name=font_family, size=12)
-                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    try:
+                        current_value = cell.value if cell.value else ""
+                        if current_value and str(current_value).strip():
+                            # 如果已经有内容，添加换行
+                            cell.value = str(current_value) + '\n' + work_order
+                        else:
+                            cell.value = work_order
+                        cell.font = Font(name=font_family, size=12)
+                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    except Exception as e:
+                        print(f"⚠️ 警告：写入单元格时出错: {e}")
+                        # 如果写入失败，尝试直接覆盖
+                        try:
+                            cell.value = work_order
+                            cell.font = Font(name=font_family, size=12)
+                            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                            cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                        except:
+                            print(f"❌ 错误：无法写入工单到单元格")
+                            raise
 
     # 边框
     thin_border = Border(
