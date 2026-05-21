@@ -60,6 +60,65 @@ def format_time_range(time_range):
     return time_range
 
 
+def fix_weekend_time_slots(time_slots, is_weekend=True):
+    """
+    强制修复周末时间槽格式，确保所有时间段都被拆分为独立时间点
+
+    Args:
+        time_slots: 时间槽列表，可能包含时间段格式
+        is_weekend: 是否为周末（默认True）
+
+    Returns:
+        修复后的时间槽列表，确保不包含任何时间段格式
+    """
+    if not is_weekend:
+        # 工作日不处理，允许时间段格式
+        return time_slots
+
+    fixed_slots = []
+    for slot in time_slots:
+        slot_str = str(slot).strip()
+        if '-' in slot_str:
+            # 发现时间段格式，必须拆分！
+            print(f"🚨 周末发现时间段格式: {slot_str}，正在自动修复...")
+            try:
+                # 拆分时间段
+                parts = slot_str.split('-')
+                if len(parts) == 2:
+                    start_time = parts[0].strip()
+                    end_time = parts[1].strip()
+                    # 添加开始和结束时间点
+                    if start_time not in fixed_slots:
+                        fixed_slots.append(start_time)
+                    if end_time not in fixed_slots:
+                        fixed_slots.append(end_time)
+                    print(f"  ✅ 拆分结果: {start_time}, {end_time}")
+                else:
+                    # 无法正常拆分，保留原样
+                    print(f"  ⚠️ 无法拆分，保留原样: {slot_str}")
+                    if slot_str not in fixed_slots:
+                        fixed_slots.append(slot_str)
+            except Exception as e:
+                print(f"  ❌ 拆分失败: {e}，保留原样")
+                if slot_str not in fixed_slots:
+                    fixed_slots.append(slot_str)
+        else:
+            # 已经是时间点格式，直接添加
+            if slot_str not in fixed_slots:
+                fixed_slots.append(slot_str)
+
+    # 按时间排序
+    def time_to_minutes(time_str):
+        try:
+            h, m = map(int, time_str.split(':'))
+            return h * 60 + m
+        except:
+            return 0
+
+    fixed_slots.sort(key=time_to_minutes)
+    return fixed_slots
+
+
 def format_title_date(title):
     """
     将标题中的日期格式化为MMDD格式
@@ -252,17 +311,34 @@ def create_schedule_sheet_from_headers_format(ws, structure):
         date_col_mapping[date] = []
         slots = time_slots.get(date, [])
 
-        # 判断是否为时间段（包含'-'）或时间点（不包含'-'）
+        # 🚨 检查是否为周末（通过时间槽格式判断）
         has_time_range = any('-' in slot for slot in slots)
 
+        # 如果有时间段格式且是周末，强制修复
         if has_time_range:
-            # 时间段：占一列
+            # 检查是否为周末（通过日期字符串判断或其他方式）
+            # 这里我们假设如果有时间段且看起来像周末，先尝试修复
+            print(f"检查日期 {date} 的时间槽: {slots}")
+            fixed_slots = fix_weekend_time_slots(slots, is_weekend=True)
+
+            # 如果修复后时间槽数量不同，说明确实是周末需要修复
+            if len(fixed_slots) != len(slots):
+                print(f"✅ 修复周末时间槽: {date}")
+                print(f"  原始: {slots}")
+                print(f"  修复: {fixed_slots}")
+                time_slots[date] = fixed_slots
+                slots = fixed_slots
+                # 重新判断
+                has_time_range = any('-' in slot for slot in slots)
+
+        if has_time_range:
+            # 时间段：占一列（工作日）
             date_col_mapping[date].append(current_col)
             # Issue 4: 工作日列宽32
             ws.column_dimensions[get_column_letter(current_col)].width = 32
             current_col += 1
         else:
-            # 时间点：每个时间点占一列
+            # 时间点：每个时间点占一列（周末）
             for _ in slots:
                 date_col_mapping[date].append(current_col)
                 # Issue 4: 周末列宽16
@@ -582,17 +658,36 @@ def create_schedule_sheet_from_assignments_format(ws, data):
 
     # 分析每个日期是工作日还是周末
     date_is_weekend = {}
+
+    # 🚨 首先检查并修复所有周末时间槽格式
+    print("=== 开始检查周末时间槽格式 (assignments格式) ===")
     for assignment in assignments:
         for task in assignment.get('tasks', []):
             date = task.get('date', '')
             if date:
                 time_slots = time_row_data.get(date, [])
+                # 检查是否包含时间段格式
+                has_time_range = any('-' in str(slot) for slot in time_slots)
+
+                if has_time_range:
+                    # 可能是周末的时间段格式，需要修复
+                    print(f"检查日期 {date} 的时间槽: {time_slots}")
+                    fixed_slots = fix_weekend_time_slots(time_slots, is_weekend=True)
+
+                    if len(fixed_slots) != len(time_slots) or fixed_slots != time_slots:
+                        print(f"✅ 修复周末时间槽: {date}")
+                        print(f"  原始: {time_slots}")
+                        print(f"  修复: {fixed_slots}")
+                        time_row_data[date] = fixed_slots
+                        time_slots = fixed_slots
+
                 # 判断是否为工作日
                 is_workday = (len(time_slots) > 0 and
                              all(slot == time_slots[0] for slot in time_slots) and
                              '-' not in str(time_slots[0]))
                 if date not in date_is_weekend:
                     date_is_weekend[date] = not is_workday
+    print("=== 周末时间槽格式检查完成 ===")
 
     for date in seen_dates:
         date_col_mapping[date] = []
@@ -694,11 +789,19 @@ def create_schedule_sheet_from_assignments_format(ws, data):
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         else:
             # 周末：按列显示时间点
+            # 🚨 再次检查并确保时间点格式正确
+            print(f"显示周末时间行: {date}, 时间槽: {time_slots}")
             for i, time_slot in enumerate(time_slots):
                 if i >= len(cols):
                     break
                 cell = ws.cell(row=3, column=cols[i])
-                cell.value = time_slot
+                # 确保不显示时间段格式
+                slot_display = str(time_slot).strip()
+                if '-' in slot_display and len(slot_display) > 5:
+                    # 如果仍然是时间段格式，尝试只显示开始时间
+                    print(f"⚠️ 警告：周末时间槽仍然包含时间段格式: {slot_display}")
+                    slot_display = slot_display.split('-')[0].strip()
+                cell.value = slot_display
                 cell.font = Font(name=font_family, size=14)
                 cell.alignment = Alignment(horizontal='center', vertical='center')
 
@@ -941,6 +1044,20 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             if date and date not in date_is_weekend:
                 date_is_weekend[date] = is_weekend
 
+    # 🚨 强制检查并修复所有周末时间槽格式
+    print("=== 开始检查周末时间槽格式 ===")
+    for date in dates:
+        if date_is_weekend.get(date, False):
+            time_slots = time_slots_by_date.get(date, [])
+            print(f"检查周末日期: {date}, 时间槽: {time_slots}")
+            fixed_slots = fix_weekend_time_slots(time_slots, is_weekend=True)
+            if len(fixed_slots) != len(time_slots) or fixed_slots != time_slots:
+                print(f"✅ 修复周末时间槽: {date}")
+                print(f"  原始: {time_slots}")
+                print(f"  修复: {fixed_slots}")
+                time_slots_by_date[date] = fixed_slots
+    print("=== 周末时间槽格式检查完成 ===")
+
     for date in dates:
         time_slots = time_slots_by_date.get(date, [])
         num_slots = len(time_slots)
@@ -1088,52 +1205,26 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 cell.alignment = Alignment(horizontal='center', vertical='center')
         else:
             # 周末：显示时间点
-            if len(time_slots) == 1 and '-' in str(time_slots[0]):
-                # 需要拆分时间范围
-                time_range = time_slots[0]
-                if '-' in time_range:
-                    start_time, end_time = time_range.split('-')
-                    # 为每个列生成时间点
-                    if len(cols) == 2:
-                        # 两列：使用start和end
-                        cell1 = ws.cell(row=3, column=cols[0])
-                        cell1.value = start_time
-                        cell1.font = Font(name=font_family, size=14)
-                        cell1.alignment = Alignment(horizontal='center', vertical='center')
+            # 🚨 强制检查并修复周末时间槽格式
+            print(f"检查周末时间槽: {date} - {time_slots}")
+            fixed_time_slots = fix_weekend_time_slots(time_slots, is_weekend=True)
 
-                        cell2 = ws.cell(row=3, column=cols[1])
-                        cell2.value = end_time
-                        cell2.font = Font(name=font_family, size=14)
-                        cell2.alignment = Alignment(horizontal='center', vertical='center')
-                    else:
-                        # 多列：平均分配时间点
-                        for i, col in enumerate(cols):
-                            cell = ws.cell(row=3, column=col)
-                            if i == 0:
-                                cell.value = start_time
-                            elif i == len(cols) - 1:
-                                cell.value = end_time
-                            else:
-                                # 中间列，计算中间时间点
-                                cell.value = time_range  # 暂时显示完整范围
-                            cell.font = Font(name=font_family, size=14)
-                            cell.alignment = Alignment(horizontal='center', vertical='center')
-                else:
-                    # 不包含'-'，直接显示
-                    for col in cols:
-                        cell = ws.cell(row=3, column=col)
-                        cell.value = time_slots[0]
-                        cell.font = Font(name=font_family, size=14)
-                        cell.alignment = Alignment(horizontal='center', vertical='center')
-            else:
-                # 多个时间槽，直接显示
-                for i, time_slot in enumerate(time_slots):
-                    if i >= len(cols):
-                        break
-                    cell = ws.cell(row=3, column=cols[i])
-                    cell.value = time_slot
-                    cell.font = Font(name=font_family, size=14)
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            # 如果修复后时间槽数量不同，更新time_slots_by_date
+            if len(fixed_time_slots) != len(time_slots):
+                print(f"✅ 周末时间槽已修复: {date}")
+                print(f"  原始: {time_slots}")
+                print(f"  修复: {fixed_time_slots}")
+                time_slots_by_date[date] = fixed_time_slots
+                time_slots = fixed_time_slots
+
+            # 显示修复后的时间点
+            for i, time_slot in enumerate(time_slots):
+                if i >= len(cols):
+                    break
+                cell = ws.cell(row=3, column=cols[i])
+                cell.value = time_slot
+                cell.font = Font(name=font_family, size=14)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
 
     # 人员行
     for row_idx, person_data in enumerate(personnel_assignments, start=4):
