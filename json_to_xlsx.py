@@ -331,6 +331,43 @@ def create_schedule_sheet_from_headers_format(ws, structure):
                 # 重新判断
                 has_time_range = any('-' in slot for slot in slots)
 
+        # 🔧 补全周末时间槽：确保包含所有工单中提到的时间点
+        if not has_time_range:  # 周末（时间点格式）
+            required_times = set(slots)
+            # 从personnel_rows中收集该日期的所有工单时间
+            for person_data in personnel_rows:
+                for assignment in person_data.get('assignments', []):
+                    if assignment.get('date') == date:
+                        start_time = assignment.get('start_time', '')
+                        end_time = assignment.get('end_time', '')
+                        time_range = assignment.get('time_range', '')
+
+                        # 提取时间点
+                        if start_time:
+                            required_times.add(start_time.split('-')[0] if '-' in start_time else start_time)
+                        if end_time:
+                            required_times.add(end_time.split('-')[0] if '-' in end_time else end_time)
+                        if time_range and '-' in time_range:
+                            start, end = time_range.split('-')
+                            required_times.add(start)
+                            required_times.add(end)
+
+            # 按时间排序
+            def time_to_minutes(time_str):
+                try:
+                    h, m = map(int, time_str.split(':'))
+                    return h * 60 + m
+                except:
+                    return 0
+
+            required_slots = sorted(list(required_times), key=time_to_minutes)
+            if len(required_slots) != len(slots):
+                print(f"🔧 补全周末时间槽: {date}")
+                print(f"  原始: {slots}")
+                print(f"  补全: {required_slots}")
+                time_slots[date] = required_slots
+                slots = required_slots
+
         if has_time_range:
             # 时间段：占一列（工作日）
             date_col_mapping[date].append(current_col)
@@ -1072,6 +1109,35 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 time_slots_by_date[date] = fixed_slots
     print("=== 周末时间槽格式检查完成 ===")
 
+    # 🔧 新增：确保周末时间槽包含所有工单中提到的时间点
+    print("=== 开始补全周末时间槽 ===")
+    for date in dates:
+        if date_is_weekend.get(date, False):
+            time_slots = time_slots_by_date.get(date, [])
+            required_times = set(time_slots)  # 从现有时间槽开始
+
+            # 遍历所有人员在该日期的工单，收集所有需要的时间点
+            for person_data in personnel_assignments:
+                for assignment in person_data.get('assignments', []):
+                    if assignment.get('date') == date:
+                        original_start = assignment.get('original_start', '')
+                        original_end = assignment.get('original_end', '')
+
+                        if original_start:
+                            required_times.add(original_start)
+                        if original_end:
+                            required_times.add(original_end)
+
+            # 如果发现了新的时间点，更新time_slots
+            required_times_list = sorted(list(required_times))
+            if len(required_times_list) != len(time_slots):
+                print(f"🔧 补全周末时间槽: {date}")
+                print(f"  原始: {time_slots}")
+                print(f"  补全: {required_times_list}")
+                time_slots_by_date[date] = required_times_list
+
+    print("=== 周末时间槽补全完成 ===")
+
     for date in dates:
         time_slots = time_slots_by_date.get(date, [])
         num_slots = len(time_slots)
@@ -1299,22 +1365,57 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 start_minutes = time_to_minutes(original_start)
                 end_minutes = time_to_minutes(original_end)
 
+                # 🔧 修复：更智能的时间点查找逻辑
+                print(f"查找周末工单合并范围: {work_order}")
+                print(f"  原始时间: {original_start} -> {original_end}")
+                print(f"  可用时间槽: {time_slots}")
+
                 # 查找start和end对应的时间点索引
                 start_idx = -1
                 end_idx = -1
 
+                # 首先精确匹配开始时间
                 for i, slot in enumerate(time_slots):
                     slot_minutes = time_to_minutes(slot)
-                    if slot_minutes == start_minutes:
+                    if abs(slot_minutes - start_minutes) < 1:  # 使用<1而不是==来避免浮点数问题
                         start_idx = i
-                    # 找到最接近但不超过结束时间的时间点
-                    if slot_minutes <= end_minutes:
+                        break
+
+                # 查找结束时间（支持模糊匹配）
+                for i, slot in enumerate(time_slots):
+                    slot_minutes = time_to_minutes(slot)
+                    # 精确匹配
+                    if abs(slot_minutes - end_minutes) < 1:
                         end_idx = i
+                        break
+                    # 如果没有精确匹配，找到最接近的
+                    if slot_minutes > end_minutes:
+                        # 超过了结束时间，使用前一个（如果存在）
+                        if i > 0 and end_idx == -1:
+                            end_idx = i - 1
+                        break
+                    # 更新为不超过结束时间的最接近时间点
+                    end_idx = i
+
+                # 🔧 如果没有找到结束时间点，尝试动态添加
+                if end_idx == -1 and time_slots:
+                    print(f"⚠️ 警告：未找到结束时间点 {original_end}，尝试动态添加")
+                    # 检查是否需要将结束时间添加到time_slots中
+                    # 这里我们只在极端情况下才这样做，因为可能影响列结构
+                    # 作为备选方案，使用最后一个可用的时间点
+                    end_idx = len(time_slots) - 1
+                    print(f"  使用最后可用时间点: {time_slots[end_idx]}")
 
                 # 如果找到了开始时间
                 if start_idx >= 0:
-                    # 如果结束时间不在列表中，end_idx会停在最后一个不超过结束时间的时间点
-                    # 如果确实需要合并到结束时间，使用end_idx
+                    # 确保end_idx有效
+                    if end_idx < start_idx:
+                        print(f"⚠️ 警告：结束时间索引({end_idx})小于开始时间索引({start_idx})")
+                        end_idx = start_idx
+
+                    print(f"  合并范围索引: {start_idx} -> {end_idx}")
+                    print(f"  合并时间范围: {time_slots[start_idx]} -> {time_slots[end_idx]}")
+
                     if end_idx >= start_idx:
                         should_merge = True
                         start_slot = start_idx
@@ -1323,6 +1424,11 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                         # 如果end_idx < start_idx，说明没有找到合适的时间点，只使用开始时间
                         start_slot = start_idx
                         end_slot = start_idx
+                else:
+                    print(f"❌ 错误：未找到开始时间点 {original_start}")
+                    # 即使没找到开始时间，也尝试使用time_slot_index
+                    start_slot = time_slot_index
+                    end_slot = time_slot_index
             elif not is_weekend and original_start and original_end and time_slots:
                 # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
                 # 工作日通常只有一个时间槽
