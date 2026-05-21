@@ -544,16 +544,33 @@ def create_schedule_sheet_from_headers_format(ws, structure):
                     min_col = min(target_cols)
                     max_col = max(target_cols)
 
-                    # 合并单元格
-                    ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+                    # 合并单元格（加强错误处理）
+                    try:
+                        ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+                    except Exception as merge_error:
+                        print(f"⚠️ 警告：合并单元格时出错: {merge_error}")
+                        # 尝试清除冲突的合并
+                        for merged_cell in list(ws.merged_cells.ranges):
+                            if (merged_cell.min_row == row_idx and
+                                not (merged_cell.max_col < min_col or merged_cell.min_col > max_col)):
+                                ws.merged_cells.remove(merged_cell)
+                        ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
 
                     # 放置工单内容（在第一个单元格）
                     cell = ws.cell(row_idx, column=min_col)
                     if work_order:
-                        cell.value = work_order
-                        cell.font = Font(name=font_family, size=12)
-                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                        try:
+                            cell.value = work_order
+                            cell.font = Font(name=font_family, size=12)
+                            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                            cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                        except Exception as write_error:
+                            print(f"⚠️ 警告：写入合并单元格时出错: {write_error}")
+                            # 强制写入
+                            cell.value = work_order
+                            cell.font = Font(name=font_family, size=12)
+                            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                            cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
                 elif target_cols and work_order:
                     # 单个时间点，不合并
                     target_col = target_cols[0]
@@ -943,13 +960,23 @@ def create_schedule_sheet_from_assignments_format(ws, data):
                                 if i < len(cols):
                                     target_cols.append(cols[i])
 
-                # 合并单元格并放置工单
+                # 合并单元格并放置工单（加强错误处理）
                 if target_cols:
                     target_cols = sorted(list(set(target_cols)))
                     if len(target_cols) > 1:
                         min_col = min(target_cols)
                         max_col = max(target_cols)
-                        ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+                        try:
+                            ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+                        except Exception as merge_error:
+                            print(f"⚠️ 警告：合并单元格时出错: {merge_error}")
+                            # 清除冲突的合并
+                            for merged_cell in list(ws.merged_cells.ranges):
+                                if (merged_cell.min_row == row_idx and
+                                    not (merged_cell.max_col < min_col or merged_cell.min_col > max_col)):
+                                    ws.merged_cells.remove(merged_cell)
+                            ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+
                         cell = ws.cell(row_idx, column=min_col)
                     else:
                         cell = ws.cell(row_idx, column=target_cols[0])
@@ -1430,7 +1457,7 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                             end_idx = len(time_slots) - 1
 
                 # 如果找到了开始时间
-                if start_idx >= 0 and end_idx >= start_idx:
+                if end_idx >= start_idx:
                     should_merge = True
                     start_slot = start_idx
                     end_slot = end_idx
@@ -1454,17 +1481,60 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                         start_slot = 0
                         end_slot = 0
 
+            # 🔧 执行合并单元格操作（加强错误处理）
             if should_merge and start_slot < len(cols) and end_slot < len(cols):
-                # 合并单元格
-                min_col = cols[start_slot]
-                max_col = cols[end_slot]
-                ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
-                cell = ws.cell(row_idx, column=min_col)
-                if work_order:
-                    cell.value = work_order
-                    cell.font = Font(name=font_family, size=12)
-                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                try:
+                    min_col = cols[start_slot]
+                    max_col = cols[end_slot]
+
+                    # 检查目标区域是否已经被合并
+                    target_already_merged = False
+                    for merged_cell in ws.merged_cells.ranges:
+                        if (merged_cell.min_row == row_idx and
+                            merged_cell.max_row == row_idx and
+                            not (merged_cell.max_col < min_col or merged_cell.min_col > max_col)):
+                            # 目标区域与现有合并区域重叠
+                            print(f"⚠️ 警告：目标区域已存在合并，跳过合并操作")
+                            target_already_merged = True
+                            break
+
+                    if not target_already_merged:
+                        ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+
+                    # 🔧 安全地获取主单元格并写入值
+                    cell = ws.cell(row_idx, column=min_col)
+                    if work_order:
+                        try:
+                            cell.value = work_order
+                            cell.font = Font(name=font_family, size=12)
+                            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                            cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                        except Exception as e:
+                            print(f"⚠️ 警告：写入合并单元格时出错: {e}")
+                            # 尝试清除现有合并并重新创建
+                            try:
+                                # 清除该行的所有合并
+                                merged_cells_to_remove = []
+                                for merged_cell in ws.merged_cells.ranges:
+                                    if (merged_cell.min_row == row_idx and
+                                        merged_cell.max_row == row_idx and
+                                        merged_cell.min_col <= min_col <= merged_cell.max_col):
+                                        merged_cells_to_remove.append(merged_cell)
+
+                                for merged_cell in merged_cells_to_remove:
+                                    ws.merged_cells.remove(merged_cell)
+
+                                # 重新合并
+                                ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
+                                cell = ws.cell(row_idx, column=min_col)
+                                cell.value = work_order
+                                cell.font = Font(name=font_family, size=12)
+                                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                                cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                                print(f"✅ 修复成功：清除旧合并后重新创建")
+                            except Exception as e2:
+                                print(f"❌ 错误：无法修复合并单元格问题: {e2}")
+                                raise
             else:
                 # 不合并，直接放置
                 if time_slot_index < len(cols):
