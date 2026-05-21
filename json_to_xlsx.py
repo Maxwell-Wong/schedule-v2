@@ -1111,9 +1111,12 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
 
     # 🔧 新增：确保周末时间槽包含所有工单中提到的时间点
     print("=== 开始补全周末时间槽 ===")
+    weekend_slot_mapping = {}  # 记录时间槽变化，用于后续索引调整
+
     for date in dates:
         if date_is_weekend.get(date, False):
             time_slots = time_slots_by_date.get(date, [])
+            original_slots = list(time_slots)  # 保存原始时间槽
             required_times = set(time_slots)  # 从现有时间槽开始
 
             # 遍历所有人员在该日期的工单，收集所有需要的时间点
@@ -1128,15 +1131,32 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                         if original_end:
                             required_times.add(original_end)
 
+            # 转换为分钟数进行排序
+            def time_to_minutes(time_str):
+                try:
+                    h, m = map(int, time_str.split(':'))
+                    return h * 60 + m
+                except:
+                    return 0
+
+            required_times_list = sorted(list(required_times), key=time_to_minutes)
+
             # 如果发现了新的时间点，更新time_slots
-            required_times_list = sorted(list(required_times))
-            if len(required_times_list) != len(time_slots):
+            if len(required_times_list) != len(time_slots) or required_times_list != time_slots:
                 print(f"🔧 补全周末时间槽: {date}")
                 print(f"  原始: {time_slots}")
                 print(f"  补全: {required_times_list}")
                 time_slots_by_date[date] = required_times_list
+                # 记录映射关系
+                weekend_slot_mapping[date] = {
+                    'original': original_slots,
+                    'updated': required_times_list
+                }
 
     print("=== 周末时间槽补全完成 ===")
+    if weekend_slot_mapping:
+        print("⚠️ 警告：周末时间槽已补全，合并索引将重新计算")
+        print(f"影响的日期: {list(weekend_slot_mapping.keys())}")
 
     for date in dates:
         time_slots = time_slots_by_date.get(date, [])
@@ -1345,12 +1365,8 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             # 判断是否为周末
             is_weekend = date_is_weekend.get(date, False)
 
-            if merge_info and merge_info.get('merge_cells'):
-                # 使用merge_info
-                should_merge = True
-                start_slot = merge_info.get('start_slot_index', time_slot_index)
-                end_slot = merge_info.get('end_slot_index', time_slot_index)
-            elif original_start and original_end and is_weekend and time_slots:
+            # 🔧 周末工单合并逻辑：完全忽略AI的索引，重新计算
+            if is_weekend and original_start and original_end and time_slots:
                 # 周末：自动判断是否需要合并：查找original_start和original_end对应的时间点
                 def time_to_minutes(time_str):
                     try:
@@ -1365,8 +1381,7 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 start_minutes = time_to_minutes(original_start)
                 end_minutes = time_to_minutes(original_end)
 
-                # 🔧 修复：更智能的时间点查找逻辑
-                print(f"查找周末工单合并范围: {work_order}")
+                print(f"🔍 周末工单合并计算: {work_order}")
                 print(f"  原始时间: {original_start} -> {original_end}")
                 print(f"  可用时间槽: {time_slots}")
 
@@ -1374,61 +1389,64 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                 start_idx = -1
                 end_idx = -1
 
-                # 首先精确匹配开始时间
+                # 查找开始时间点（精确匹配）
                 for i, slot in enumerate(time_slots):
                     slot_minutes = time_to_minutes(slot)
-                    if abs(slot_minutes - start_minutes) < 1:  # 使用<1而不是==来避免浮点数问题
+                    if abs(slot_minutes - start_minutes) < 1:  # 使用<1避免浮点数问题
                         start_idx = i
+                        print(f"  找到开始时间: {slot} (索引: {i})")
                         break
 
-                # 查找结束时间（支持模糊匹配）
+                # 查找结束时间点（精确匹配）
                 for i, slot in enumerate(time_slots):
                     slot_minutes = time_to_minutes(slot)
-                    # 精确匹配
                     if abs(slot_minutes - end_minutes) < 1:
                         end_idx = i
+                        print(f"  找到结束时间: {slot} (索引: {i})")
                         break
-                    # 如果没有精确匹配，找到最接近的
-                    if slot_minutes > end_minutes:
-                        # 超过了结束时间，使用前一个（如果存在）
-                        if i > 0 and end_idx == -1:
-                            end_idx = i - 1
-                        break
-                    # 更新为不超过结束时间的最接近时间点
-                    end_idx = i
 
-                # 🔧 如果没有找到结束时间点，尝试动态添加
-                if end_idx == -1 and time_slots:
-                    print(f"⚠️ 警告：未找到结束时间点 {original_end}，尝试动态添加")
-                    # 检查是否需要将结束时间添加到time_slots中
-                    # 这里我们只在极端情况下才这样做，因为可能影响列结构
-                    # 作为备选方案，使用最后一个可用的时间点
-                    end_idx = len(time_slots) - 1
-                    print(f"  使用最后可用时间点: {time_slots[end_idx]}")
+                # 🔧 如果没找到精确匹配，尝试范围匹配
+                if end_idx == -1:
+                    print(f"⚠️ 未找到精确的结束时间 {original_end}，尝试范围匹配")
+                    for i, slot in enumerate(time_slots):
+                        slot_minutes = time_to_minutes(slot)
+                        if start_minutes <= slot_minutes <= end_minutes:
+                            end_idx = i
+                            print(f"  范围匹配: {slot} (索引: {i})")
+
+                    # 如果还是没找到，使用最接近但不超出的时间点
+                    if end_idx == -1:
+                        for i, slot in enumerate(time_slots):
+                            slot_minutes = time_to_minutes(slot)
+                            if slot_minutes <= end_minutes:
+                                end_idx = i
+                            else:
+                                break
+
+                        if end_idx >= 0:
+                            print(f"  使用最接近时间点: {time_slots[end_idx]} (索引: {end_idx})")
+                        else:
+                            print(f"❌ 完全无法找到合适的结束时间点，使用最后一个时间槽")
+                            end_idx = len(time_slots) - 1
 
                 # 如果找到了开始时间
-                if start_idx >= 0:
-                    # 确保end_idx有效
-                    if end_idx < start_idx:
-                        print(f"⚠️ 警告：结束时间索引({end_idx})小于开始时间索引({start_idx})")
-                        end_idx = start_idx
-
-                    print(f"  合并范围索引: {start_idx} -> {end_idx}")
-                    print(f"  合并时间范围: {time_slots[start_idx]} -> {time_slots[end_idx]}")
-
-                    if end_idx >= start_idx:
-                        should_merge = True
-                        start_slot = start_idx
-                        end_slot = end_idx
-                    else:
-                        # 如果end_idx < start_idx，说明没有找到合适的时间点，只使用开始时间
-                        start_slot = start_idx
-                        end_slot = start_idx
+                if start_idx >= 0 and end_idx >= start_idx:
+                    should_merge = True
+                    start_slot = start_idx
+                    end_slot = end_idx
+                    print(f"✅ 最终合并范围: 索引{start_slot}->{end_slot}, 时间{time_slots[start_slot]}->{time_slots[end_slot]}")
                 else:
-                    print(f"❌ 错误：未找到开始时间点 {original_start}")
-                    # 即使没找到开始时间，也尝试使用time_slot_index
-                    start_slot = time_slot_index
-                    end_slot = time_slot_index
+                    print(f"❌ 无法确定合并范围，使用原始索引: {time_slot_index}")
+                    if merge_info and merge_info.get('merge_cells'):
+                        should_merge = True
+                        start_slot = merge_info.get('start_slot_index', time_slot_index)
+                        end_slot = merge_info.get('end_slot_index', time_slot_index)
+            else:
+                # 非周末或没有时间信息，使用原始逻辑
+                if merge_info and merge_info.get('merge_cells'):
+                    should_merge = True
+                    start_slot = merge_info.get('start_slot_index', time_slot_index)
+                    end_slot = merge_info.get('end_slot_index', time_slot_index)
             elif not is_weekend and original_start and original_end and time_slots:
                 # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
                 # 工作日通常只有一个时间槽
