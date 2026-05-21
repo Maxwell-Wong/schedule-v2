@@ -9,19 +9,11 @@ import json
 import re
 import pandas as pd
 import os
-import logging
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta
 import copy
-
-# 配置日志
-logging.basicConfig(
-    filename='schedule_fix.log',
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 
 
 def fix_color_code(color_code):
@@ -1037,20 +1029,6 @@ def create_data_sheet_from_dataframe(ws, df):
     for row in ws.iter_rows(min_row=1, max_row=len(df)+1, min_col=1, max_col=len(df.columns)):
         for cell in row:
             cell.border = thin_border
-
-
-def ensure_data_completeness(json_data, original_excel_path='data/sheet_input.xlsx'):
-    logging.info("数据完整性检查...")
-    if not os.path.exists(original_excel_path):
-        return json_data
-    original_df = pd.read_excel(original_excel_path)
-    original_columns = set(original_df.columns) - {'序号'}
-    return json_data
-
-
-def split_weekend_time_slots(schedule_data):
-    logging.info("周末时间不拆分，使用原始格式")
-    return schedule_data
 
 
 def load_json_result(json_file='ai_responses/schedule_result.json'):
