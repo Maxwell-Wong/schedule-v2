@@ -1100,6 +1100,27 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             if date and date not in date_is_weekend:
                 date_is_weekend[date] = is_weekend
 
+    # 🔧 修复1：对时间槽进行去重，避免重复列
+    print("=== 开始去重时间槽 ===")
+    for date in dates:
+        if date in time_slots_by_date:
+            original_slots = time_slots_by_date[date]
+            # 使用dict去重，保持顺序
+            seen = set()
+            unique_slots = []
+            for slot in original_slots:
+                if slot not in seen:
+                    seen.add(slot)
+                    unique_slots.append(slot)
+
+            if len(unique_slots) != len(original_slots):
+                print(f"🔧 去重时间槽: {date}")
+                print(f"  原始: {len(original_slots)}个时间槽 (有{len(original_slots) - len(unique_slots)}个重复)")
+                print(f"  去重: {len(unique_slots)}个时间槽")
+                print(f"  时间槽: {unique_slots}")
+                time_slots_by_date[date] = unique_slots
+    print("=== 时间槽去重完成 ===")
+
     # 🚨 强制检查并修复所有周末时间槽格式
     print("=== 开始检查周末时间槽格式 ===")
     for date in dates:
@@ -1162,6 +1183,50 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
     if weekend_slot_mapping:
         print("⚠️ 警告：周末时间槽已补全，合并索引将重新计算")
         print(f"影响的日期: {list(weekend_slot_mapping.keys())}")
+
+    # 🔧 修复2：添加工单去重逻辑，防止重复分配
+    print("=== 开始工单去重检查 ===")
+    work_order_tracker = {}  # {(date, work_order): [person_name, ...]}
+
+    for person_data in personnel_assignments:
+        person_name = person_data.get('name', '')
+        assignments = person_data.get('assignments', [])
+        filtered_assignments = []
+
+        for assignment in assignments:
+            date = assignment.get('date', '')
+            work_order = assignment.get('work_order', '')
+
+            # 提取工单编号（后4位数字）
+            import re
+            match = re.search(r'(\d{4})', str(work_order))
+            if match:
+                order_num = match.group(1)
+                key = (date, order_num)
+            else:
+                key = (date, work_order)
+
+            # 检查是否重复
+            if key in work_order_tracker:
+                existing_persons = work_order_tracker[key]
+                if person_name in existing_persons:
+                    print(f"⚠️ 跳过重复工单: {person_name} - {work_order} @ {date}")
+                    continue
+                else:
+                    print(f"⚠️ 工单重复分配: {work_order} @ {date}")
+                    print(f"  已分配给: {existing_persons}")
+                    print(f"  尝试分配给: {person_name}")
+                    # 跳过重复分配
+                    continue
+
+            work_order_tracker[key] = work_order_tracker.get(key, []) + [person_name]
+            filtered_assignments.append(assignment)
+
+        # 更新assignments列表
+        person_data['assignments'] = filtered_assignments
+        print(f"✅ {person_name}: {len(assignments)} -> {len(filtered_assignments)} 个工单")
+
+    print("=== 工单去重检查完成 ===")
 
     for date in dates:
         time_slots = time_slots_by_date.get(date, [])
@@ -1624,6 +1689,40 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
     for row in ws.iter_rows(min_row=1, max_row=len(personnel_assignments)+3, min_col=1, max_col=total_cols):
         for cell in row:
             cell.border = thin_border
+
+    # 🔧 修复3：检测Excel中的重复工单
+    print("=== 开始检测Excel中的重复工单 ===")
+    excel_work_orders = {}  # {(date, col): work_order}
+
+    for row_idx in range(4, len(personnel_assignments) + 4):
+        for date in dates:
+            if date not in date_col_mapping:
+                continue
+
+            cols = date_col_mapping[date]
+            time_slots = time_slots_by_date.get(date, [])
+
+            # 检查该行该日期的所有单元格
+            for col_idx, col in enumerate(cols):
+                if col_idx >= len(time_slots):
+                    break
+
+                cell = ws.cell(row=row_idx, column=col)
+                if cell.value and str(cell.value).strip():
+                    cell_value = str(cell.value).strip()
+                    key = (date, col_idx)
+
+                    if key in excel_work_orders:
+                        existing_value = excel_work_orders[key]
+                        if existing_value != cell_value:
+                            print(f"❌ 发现重复: 日期{date}, 列{col_idx}({time_slots[col_idx]})")
+                            print(f"  已有工单: {existing_value}")
+                            print(f"  新工单: {cell_value}")
+                            print(f"  🔧 这会导致Excel中出现重复工单！")
+                    else:
+                        excel_work_orders[key] = cell_value
+
+    print("=== Excel重复工单检测完成 ===")
 
     # 然后专门为合并的空白单元格应用边框（确保左上角单元格有完整边框）
     for row_idx in range(4, len(personnel_assignments) + 4):
