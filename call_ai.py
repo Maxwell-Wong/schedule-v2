@@ -14,6 +14,25 @@ from datetime import datetime
 from openai import OpenAI
 
 
+def save_ai_input_log(prompt, output_file='schedule_fix.log'):
+    """Save AI input prompt to log file"""
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("AI INPUT PROMPT LOG\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Prompt Length: {len(prompt)} characters\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(prompt)
+            f.write("\n\n" + "=" * 80 + "\n")
+            f.write("END OF AI INPUT LOG\n")
+            f.write("=" * 80 + "\n")
+        print(f"  ✓ AI input prompt saved to: {output_file}")
+    except Exception as e:
+        print(f"  ⚠️ Warning: Failed to save AI input log: {e}")
+
+
 def load_config(config_file='config.ini'):
     """Load configuration file"""
     config = configparser.ConfigParser()
@@ -389,6 +408,9 @@ def main():
         print("\n[4/5] Combining prompts and calling AI...")
         full_prompt = combine_prompt(prompt_parts, excel_data_text)
         print(f"  ✓ Complete prompt length: {len(full_prompt)} characters")
+
+        # Save AI input prompt to log file
+        save_ai_input_log(full_prompt, 'schedule_fix.log')
 
         response = call_ai(
             api_key=config['api_key'],
