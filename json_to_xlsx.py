@@ -1504,37 +1504,22 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                     # 🔧 安全地获取主单元格并写入值
                     cell = ws.cell(row_idx, column=min_col)
                     if work_order:
-                        try:
-                            cell.value = work_order
-                            cell.font = Font(name=font_family, size=12)
-                            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                            cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
-                        except Exception as e:
-                            print(f"⚠️ 警告：写入合并单元格时出错: {e}")
-                            # 尝试清除现有合并并重新创建
-                            try:
-                                # 清除该行的所有合并
-                                merged_cells_to_remove = []
-                                for merged_cell in ws.merged_cells.ranges:
-                                    if (merged_cell.min_row == row_idx and
-                                        merged_cell.max_row == row_idx and
-                                        merged_cell.min_col <= min_col <= merged_cell.max_col):
-                                        merged_cells_to_remove.append(merged_cell)
-
-                                for merged_cell in merged_cells_to_remove:
-                                    ws.merged_cells.remove(merged_cell)
-
-                                # 重新合并
-                                ws.merge_cells(start_row=row_idx, start_column=min_col, end_row=row_idx, end_column=max_col)
-                                cell = ws.cell(row_idx, column=min_col)
-                                cell.value = work_order
-                                cell.font = Font(name=font_family, size=12)
-                                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                                cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
-                                print(f"✅ 修复成功：清除旧合并后重新创建")
-                            except Exception as e2:
-                                print(f"❌ 错误：无法修复合并单元格问题: {e2}")
-                                raise
+                        cell.value = work_order
+                        cell.font = Font(name=font_family, size=12)
+                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                except Exception as outer_error:
+                    print(f"⚠️ 警告：合并单元格操作失败: {outer_error}")
+                    # 尝试简化版本的合并
+                    try:
+                        cell = ws.cell(row_idx, column=cols[start_slot])
+                        cell.value = work_order
+                        cell.font = Font(name=font_family, size=12)
+                        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                        print(f"✅ 使用简化版本成功")
+                    except Exception as final_error:
+                        print(f"❌ 无法放置工单: {final_error}")
             else:
                 # 不合并，直接放置
                 if time_slot_index < len(cols):
