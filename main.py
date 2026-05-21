@@ -10,6 +10,11 @@ import os
 import sys
 import argparse
 
+# 🔧 添加当前目录到Python搜索路径，解决模块导入问题
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 
 def run_ai_schedule():
     """运行AI排班生成"""
@@ -21,6 +26,8 @@ def run_ai_schedule():
         return True
     except Exception as e:
         print(f"AI排班生成失败: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -34,6 +41,8 @@ def run_json_to_xlsx():
         return True
     except Exception as e:
         print(f"JSON到Excel转换失败: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
