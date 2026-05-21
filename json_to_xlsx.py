@@ -1447,12 +1447,12 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                     should_merge = True
                     start_slot = merge_info.get('start_slot_index', time_slot_index)
                     end_slot = merge_info.get('end_slot_index', time_slot_index)
-            elif not is_weekend and original_start and original_end and time_slots:
-                # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
-                # 工作日通常只有一个时间槽
-                if len(time_slots) > 0:
-                    start_slot = 0
-                    end_slot = 0
+                elif not is_weekend and original_start and original_end and time_slots:
+                    # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
+                    # 工作日通常只有一个时间槽
+                    if len(time_slots) > 0:
+                        start_slot = 0
+                        end_slot = 0
 
             if should_merge and start_slot < len(cols) and end_slot < len(cols):
                 # 合并单元格
