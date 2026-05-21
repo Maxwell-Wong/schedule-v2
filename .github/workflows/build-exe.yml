@@ -28,31 +28,37 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build EXE with PyInstaller
+    - name: Build call_ai EXE with PyInstaller
       run: |
-        pyinstaller --onefile --console --name schedule-v2 --add-data "data;data" --add-data "config.ini;." call_ai.py
+        pyinstaller --onefile --console --name schedule-call-ai --add-data "data;data" --add-data "config.ini;." --add-data "prompt_part1_fixed_rules.md;." --add-data "prompt_part2_variables.md;." --add-data "prompt_part3_output_rules.md;." --add-data "prompt_weekend_time_rules.md;." call_ai.py
+
+    - name: Build json_to_xlsx EXE with PyInstaller
+      run: |
+        pyinstaller --onefile --console --name schedule-json-to-xlsx --add-data "data;data" json_to_xlsx.py
 
     - name: Rename EXE with version
       run: |
         if ("${{ github.ref }}" -match "refs/tags/v*") {
           $version = "${{ github.ref }}" -replace "refs/tags/v", ""
-          Move-Item dist/schedule-v2.exe "dist/schedule-v2-$version.exe"
+          Move-Item dist/schedule-call-ai.exe "dist/schedule-call-ai-$version.exe"
+          Move-Item dist/schedule-json-to-xlsx.exe "dist/schedule-json-to-xlsx-$version.exe"
         } else {
-          Move-Item dist/schedule-v2.exe "dist/schedule-v2-latest.exe"
+          Move-Item dist/schedule-call-ai.exe "dist/schedule-call-ai-latest.exe"
+          Move-Item dist/schedule-json-to-xlsx.exe "dist/schedule-json-to-xlsx-latest.exe"
         }
 
-    - name: Upload EXE artifact
+    - name: Upload EXE artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: schedule-v2-windows-exe
-        path: dist/schedule-v2-*.exe
+        name: schedule-windows-exe
+        path: dist/*.exe
         retention-days: 30
 
     - name: Create Release (if tagged)
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
-        files: dist/schedule-v2-*.exe
+        files: dist/*.exe
         draft: false
         prerelease: false
       env:

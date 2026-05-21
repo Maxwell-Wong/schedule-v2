@@ -1718,119 +1718,12 @@ def enforce_balanced_assignment(data):
     return data_copy
 
 
-def remove_duplicate_assignments(data):
-    """
-    检测并去除重复的工单分配
-    确保每个工单编号只分配给一个人
-    """
-    import copy
-
-    # 创建数据的深拷贝
-    data_copy = copy.deepcopy(data)
-
-    # 处理不同的格式
-    if 'personnel_assignments' in data_copy:
-        personnel_assignments = data_copy['personnel_assignments']
-        # 收集所有工单及其分配
-        work_order_assignments = {}  # {work_order: [(person_idx, assignment_idx), ...]}
-
-        for person_idx, person in enumerate(personnel_assignments):
-            assignments = person.get('assignments', [])
-            for assignment_idx, assignment in enumerate(assignments):
-                work_order = assignment.get('work_order', '')
-                # 提取工单编号（后4位）
-                import re
-                match = re.search(r'\d{4}', work_order)
-                if match:
-                    order_num = match.group()
-                    if order_num not in work_order_assignments:
-                        work_order_assignments[order_num] = []
-                    work_order_assignments[order_num].append((person_idx, assignment_idx))
-
-        # 去除重复分配，只保留第一次分配
-        print("=== 检测工单重复分配 ===")
-        duplicates_found = False
-
-        # 收集需要删除的项（人员索引，分配索引）
-        to_remove = []
-
-        for order_num, assignments_list in work_order_assignments.items():
-            if len(assignments_list) > 1:
-                duplicates_found = True
-                print(f"发现重复工单: {order_num} (分配给{len(assignments_list)}个人)")
-                # 保留第一次分配，记录需要删除的其他项
-                for i in range(1, len(assignments_list)):
-                    to_remove.append(assignments_list[i])
-
-        # 反向排序删除项（从后往前删除，避免索引变化）
-        to_remove_sorted = sorted(to_remove, key=lambda x: (x[0], x[1]), reverse=True)
-
-        for person_idx, assignment_idx in to_remove_sorted:
-            person = personnel_assignments[person_idx]
-            assignments = person['assignments']
-            if assignment_idx < len(assignments):
-                removed_assignment = assignments.pop(assignment_idx)
-                print(f"  删除: {person['name']} 的 {removed_assignment.get('work_order', '')}")
-
-        if not duplicates_found:
-            print("✓ 未发现重复工单分配")
-
-    elif 'assignments_final' in data_copy:
-        assignments_final = data_copy['assignments_final']
-        # 收集所有工单及其分配
-        work_order_assignments = {}
-
-        for person_idx, person in enumerate(assignments_final):
-            assignments = person.get('assignments', [])
-            for assignment_idx, assignment in enumerate(assignments):
-                work_order = assignment.get('work_order', '')
-                # 提取工单编号（后4位）
-                import re
-                match = re.search(r'\d{4}', work_order)
-                if match:
-                    order_num = match.group()
-                    if order_num not in work_order_assignments:
-                        work_order_assignments[order_num] = []
-                    work_order_assignments[order_num].append((person_idx, assignment_idx))
-
-        # 去除重复分配，只保留第一次分配
-        print("=== 检测工单重复分配 ===")
-        duplicates_found = False
-
-        # 收集需要删除的项
-        to_remove = []
-
-        for order_num, assignments_list in work_order_assignments.items():
-            if len(assignments_list) > 1:
-                duplicates_found = True
-                print(f"发现重复工单: {order_num} (分配给{len(assignments_list)}个人)")
-                # 保留第一次分配，记录需要删除的其他项
-                for i in range(1, len(assignments_list)):
-                    to_remove.append(assignments_list[i])
-
-        # 反向排序删除项（从后往前删除，避免索引变化）
-        to_remove_sorted = sorted(to_remove, key=lambda x: (x[0], x[1]), reverse=True)
-
-        for person_idx, assignment_idx in to_remove_sorted:
-            person = assignments_final[person_idx]
-            assignments = person['assignments']
-            if assignment_idx < len(assignments):
-                removed_assignment = assignments.pop(assignment_idx)
-                print(f"  删除: {person['personnel']} 的 {removed_assignment.get('work_order', '')}")
-
-        if not duplicates_found:
-            print("✓ 未发现重复工单分配")
-
-    return data_copy
 
 
 # ====================== 完整还原：生成 2 个工作表 ======================
 def create_excel_from_json(data, output_file='output_transformed.xlsx'):
     # 首先执行均衡分配检查和自动修正（最高优先级）
     data = enforce_balanced_assignment(data)
-
-    # 然后去除重复的工单分配（确保每个工单只分配给一个人）
-    data = remove_duplicate_assignments(data)
 
     wb = Workbook()
     if 'Sheet' in wb.sheetnames:
