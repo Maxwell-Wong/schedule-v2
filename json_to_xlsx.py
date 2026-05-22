@@ -802,8 +802,9 @@ def create_schedule_sheet_from_assignments_format(ws, data):
         if is_workday:
             # 工作日：查找最长的时间范围
             best_start = None
-            best_end = None
-            best_duration = 0
+            # 🔧 修复：查找最小起始时间和最大结束时间，而不是最长持续时间
+            all_starts = []
+            all_ends = []
 
             for assignment in assignments:
                 for task in assignment.get('tasks', []):
@@ -814,13 +815,20 @@ def create_schedule_sheet_from_assignments_format(ws, data):
                             try:
                                 start_min = int(start.split(':')[0]) * 60 + int(start.split(':')[1])
                                 end_min = int(end.split(':')[0]) * 60 + int(end.split(':')[1])
-                                duration = end_min - start_min
-                                if duration > best_duration:
-                                    best_duration = duration
-                                    best_start = start
-                                    best_end = end
+                                all_starts.append((start_min, start))
+                                all_ends.append((end_min, end))
                             except:
                                 pass
+
+            if all_starts and all_ends:
+                # 找最小起始时间和最大结束时间
+                min_start = min(all_starts, key=lambda x: x[0])
+                max_end = max(all_ends, key=lambda x: x[0])
+                best_start = min_start[1]
+                best_end = max_end[1]
+            else:
+                best_start = None
+                best_end = None
 
             time_range = f"{best_start}-{best_end}" if best_start and best_end else time_slots[0]
 
@@ -1091,14 +1099,25 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
     current_col = 2
 
     # 首先分析每个日期是工作日还是周末
+    # 🔧 修复：基于时间槽内容判断，而不是AI的is_weekend字段
     date_is_weekend = {}  # {date: is_weekend}
 
-    for person_data in personnel_assignments:
-        for assignment in person_data.get('assignments', []):
-            date = assignment.get('date', '')
-            is_weekend = assignment.get('is_weekend', False)
-            if date and date not in date_is_weekend:
-                date_is_weekend[date] = is_weekend
+    for date in dates:
+        time_slots = time_slots_by_date.get(date, [])
+
+        if not time_slots:
+            continue
+
+        # 🔧 新逻辑：
+        # - 如果所有时间槽都是纯时间点（不含"-"），则为周末
+        # - 如果任何时间槽包含时间范围（含"-"），则为工作日
+        has_time_range = any('-' in str(slot) for slot in time_slots)
+        all_time_points = all('-' not in str(slot) for slot in time_slots)
+
+        if all_time_points:
+            date_is_weekend[date] = True  # 周末：纯时间点
+        else:
+            date_is_weekend[date] = False  # 工作日：包含时间范围
 
     # 🔧 修复1：对时间槽进行去重，避免重复列
     print("=== 开始去重时间槽 ===")
@@ -1184,14 +1203,13 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
         print("⚠️ 警告：周末时间槽已补全，合并索引将重新计算")
         print(f"影响的日期: {list(weekend_slot_mapping.keys())}")
 
-    # 🔧 修复2：添加工单去重逻辑，防止重复分配
-    print("=== 开始工单去重检查 ===")
-    work_order_tracker = {}  # {(date, work_order): [person_name, ...]}
+    # 🔧 修复2：检测工单重复（但不移除，仅报告）
+    print("=== 开始工单重复检测（仅检测，不移除） ===")
+    work_order_tracker = {}  # {(date, order_num): [person_name, ...]}
 
     for person_data in personnel_assignments:
         person_name = person_data.get('name', '')
         assignments = person_data.get('assignments', [])
-        filtered_assignments = []
 
         for assignment in assignments:
             date = assignment.get('date', '')
@@ -1206,27 +1224,37 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
             else:
                 key = (date, work_order)
 
-            # 检查是否重复
-            if key in work_order_tracker:
-                existing_persons = work_order_tracker[key]
-                if person_name in existing_persons:
-                    print(f"⚠️ 跳过重复工单: {person_name} - {work_order} @ {date}")
-                    continue
-                else:
-                    print(f"⚠️ 工单重复分配: {work_order} @ {date}")
-                    print(f"  已分配给: {existing_persons}")
-                    print(f"  尝试分配给: {person_name}")
-                    # 跳过重复分配
-                    continue
+            # 记录但不移除
+            if key not in work_order_tracker:
+                work_order_tracker[key] = []
+            work_order_tracker[key].append(person_name)
 
-            work_order_tracker[key] = work_order_tracker.get(key, []) + [person_name]
-            filtered_assignments.append(assignment)
+    # 报告重复情况
+    duplicates_found = False
+    duplicate_count = 0
+    for key, persons in work_order_tracker.items():
+        if len(persons) > 1:
+            if not duplicates_found:
+                print(f"⚠️ 检测到工单重复分配:")
+                duplicates_found = True
+            date, order_num = key
+            duplicate_count += 1
+            print(f"  日期{date}, 工单编号{order_num}: 分配给{len(persons)}人 - {', '.join(persons)}")
 
-        # 更新assignments列表
-        person_data['assignments'] = filtered_assignments
-        print(f"✅ {person_name}: {len(assignments)} -> {len(filtered_assignments)} 个工单")
+    if not duplicates_found:
+        print("✅ 无工单重复分配")
+    else:
+        print(f"💡 检测到 {duplicate_count} 个工单被重复分配")
+        print("💡 这些工单将在Excel中由多个人同时显示（保留AI的原分配）")
 
-    print("=== 工单去重检查完成 ===")
+    # 统计分配
+    print("\n工单分配统计:")
+    for person_data in personnel_assignments:
+        person_name = person_data.get('name', '')
+        count = len(person_data.get('assignments', []))
+        print(f"  {person_name}: {count} 个工单")
+
+    print("=== 工单重复检测完成 ===")
 
     for date in dates:
         time_slots = time_slots_by_date.get(date, [])
@@ -1333,11 +1361,10 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
         is_workday = not date_is_weekend.get(date, False)
 
         if is_workday:
-            # 工作日：需要从工单中提取最长的时间范围来显示
+            # 🔧 修复：工作日应该取最小起始时间到最大结束时间
             # 查找该日期所有工单的时间范围
-            best_start = None
-            best_end = None
-            best_duration = 0
+            all_starts = []
+            all_ends = []
 
             for person_data in personnel_assignments:
                 for task in person_data.get('assignments', []):
@@ -1348,16 +1375,18 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                             try:
                                 start_min = int(start.split(':')[0]) * 60 + int(start.split(':')[1])
                                 end_min = int(end.split(':')[0]) * 60 + int(end.split(':')[1])
-                                duration = end_min - start_min
-                                if duration > best_duration:
-                                    best_duration = duration
-                                    best_start = start
-                                    best_end = end
+                                all_starts.append((start_min, start))
+                                all_ends.append((end_min, end))
                             except:
                                 pass
 
             # 如果找到了时间范围，显示它；否则显示原始时间槽
-            if best_start and best_end:
+            if all_starts and all_ends:
+                # 找最小起始时间和最大结束时间
+                min_start = min(all_starts, key=lambda x: x[0])
+                max_end = max(all_ends, key=lambda x: x[0])
+                best_start = min_start[1]
+                best_end = max_end[1]
                 formatted_time = f"{best_start} 至 {best_end}"
             elif time_slots:
                 # 使用原始时间槽，尝试格式化
@@ -1517,12 +1546,10 @@ def create_schedule_sheet_from_new_structure_format(ws, data):
                     should_merge = True
                     start_slot = merge_info.get('start_slot_index', time_slot_index)
                     end_slot = merge_info.get('end_slot_index', time_slot_index)
-                elif not is_weekend and original_start and original_end and time_slots:
-                    # 工作日：如果时间范围与该日期的任何工单重叠，则放在第一列
-                    # 工作日通常只有一个时间槽
-                    if len(time_slots) > 0:
-                        start_slot = 0
-                        end_slot = 0
+                elif not is_weekend:
+                    # 🔧 工作日：所有工单都放在第一列（因为工作日只显示一个合并的时间范围）
+                    should_merge = False  # 不需要合并，直接放置
+                    time_slot_index = 0  # 强制使用第一列
 
             # 🔧 执行合并单元格操作（加强错误处理）
             if should_merge and start_slot < len(cols) and end_slot < len(cols):
